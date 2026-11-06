@@ -15,7 +15,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      # O card vem antes da cobrinha: a cobrinha roda em Docker e deixa a pasta dist só para o administrador.
+      - name: Gerar card "Status do jogador"
+        run: node .github/scripts/stats.mjs dist/stats.svg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_LOGIN: ${{ github.repository_owner }}
 
       - name: Gerar cobrinha
         uses: Platane/snk@v3
@@ -24,16 +35,6 @@ jobs:
           outputs: |
             dist/snake.svg?palette=github-light&color_snake=#be288c&color_dots=#ebedf0,#ffd6e3,#ff9ebb,#ff6a8a,#be288c
             dist/snake-dark.svg?palette=github-dark&color_snake=#00e5ff&color_dots=#18083a,#3d1466,#7a1478,#be288c,#ff6a8a
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Gerar card "Status do jogador"
-        run: node .github/scripts/stats.mjs dist/stats.svg
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_LOGIN: ${{ github.repository_owner }}
 
       - name: Publicar na branch output
         uses: crazy-max/ghaction-github-pages@v4
