@@ -8,12 +8,17 @@ const mock = args.includes('--mock');
 const out = args.filter(a => a !== '--mock')[0] || 'dist/stats.svg';
 const login = process.env.GH_LOGIN || 'volatiun';
 
+// Só contribuições pelo GraphQL (mesma consulta que a cobrinha usa); repositórios pela API REST pública.
 const QUERY = `query($login:String!){ user(login:$login){
-  repositories(ownerAffiliations:OWNER, isFork:false, privacy:PUBLIC, first:100){ totalCount
-    nodes{ stargazerCount languages(first:10, orderBy:{field:SIZE, direction:DESC}){ edges{ size node{ name color } } } } }
   contributionsCollection{ totalCommitContributions totalPullRequestContributions totalIssueContributions
     contributionCalendar{ totalContributions weeks{ contributionDays{ date contributionCount } } } }
 }}`;
+const LANG_COLORS = { HTML: '#e34c26', CSS: '#663399', JavaScript: '#f1e05a', TypeScript: '#3178c6', Python: '#3572A5',
+  Lua: '#000080', PowerShell: '#012456', Shell: '#89e051', Java: '#b07219', 'C#': '#178600', 'C++': '#f34b7d', C: '#555555', Go: '#00ADD8' };
+const headers = () => ({ Accept: 'application/vnd.github+json', 'User-Agent': 'profile-stats',
+  ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}) });
+const EMPTY_CC = { totalCommitContributions: 0, totalPullRequestContributions: 0, totalIssueContributions: 0,
+  contributionCalendar: { totalContributions: 0, weeks: [] } };
 
 async function load() {
   if (mock) {
@@ -27,14 +32,35 @@ async function load() {
         contributionCalendar: { totalContributions: 12, weeks: [{ contributionDays: days }] } },
     };
   }
-  const r = await fetch('https://api.github.com/graphql', {
-    method: 'POST',
-    headers: { Authorization: `bearer ${process.env.GITHUB_TOKEN}`, 'Content-Type': 'application/json', 'User-Agent': 'profile-stats' },
-    body: JSON.stringify({ query: QUERY, variables: { login } }),
-  });
-  const j = await r.json();
-  if (!j.data?.user) throw new Error(JSON.stringify(j));
-  return j.data.user;
+  // contribuições
+  let contributionsCollection = EMPTY_CC;
+  try {
+    const r = await fetch('https://api.github.com/graphql', {
+      method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: QUERY, variables: { login } }),
+    });
+    const j = await r.json();
+    if (j.data?.user?.contributionsCollection) contributionsCollection = j.data.user.contributionsCollection;
+    else console.warn('aviso: contribuições indisponíveis', JSON.stringify(j).slice(0, 300));
+  } catch (e) { console.warn('aviso: contribuições falharam', e.message); }
+
+  // repositórios públicos (sem forks) e linguagens
+  const nodes = [];
+  try {
+    const r = await fetch(`https://api.github.com/users/${login}/repos?per_page=100&type=owner`, { headers: headers() });
+    const repos = await r.json();
+    if (!Array.isArray(repos)) throw new Error(JSON.stringify(repos).slice(0, 300));
+    for (const repo of repos.filter(x => !x.fork)) {
+      let edges = [];
+      try {
+        const lr = await fetch(repo.languages_url, { headers: headers() });
+        const lj = await lr.json();
+        edges = Object.entries(lj).map(([name, size]) => ({ size, node: { name, color: LANG_COLORS[name] } }));
+      } catch { /* sem linguagens para este repo */ }
+      nodes.push({ stargazerCount: repo.stargazers_count, languages: { edges } });
+    }
+  } catch (e) { console.warn('aviso: repositórios falharam', e.message); }
+  return { repositories: { totalCount: nodes.length, nodes }, contributionsCollection };
 }
 
 const u = await load();
